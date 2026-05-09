@@ -9,6 +9,8 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Allows the bot to commit last_signals.json back to the repo
     
     # GitHub Actions will forcefully kill jobs after 6 hours. 
     # Our python script handles its own graceful exit at 5h 50m.
@@ -31,8 +33,14 @@ jobs:
 
       - name: Run Trading Bot
         env:
-          # Using Secrets for Telegram Configuration (optional but recommended)
-          # If secrets aren't set, the bot will use the default values hardcoded in notifier.py
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python main.py
+          PYTHONIOENCODING: utf-8
+        run: python -u main.py
+
+      - name: Save Signal State
+        if: always() # Ensure state is saved even if the bot is killed or errors
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add last_signals.json || true
+          git commit -m "Update signal tracking [skip ci]" || true
+          git push || true
