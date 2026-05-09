@@ -1,13 +1,9 @@
 import requests
 import os
 
-# Default values from the user
-DEFAULT_BOT_TOKEN = "8317215211:AAFR_pTgQptiT5N79Y9VzcftotceBbXLAhE"
-DEFAULT_CHAT_ID = "-1003708562178"
-
-# Allow overriding with Environment Variables (especially for GitHub Actions)
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", DEFAULT_BOT_TOKEN)
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", DEFAULT_CHAT_ID)
+# Telegram Configuration (Directly in code)
+TELEGRAM_BOT_TOKEN = "8317215211:AAFR_pTgQptiT5N79Y9VzcftotceBbXLAhE"
+TELEGRAM_CHAT_ID = "-1003708562178"
 
 def send_telegram_message(message: str):
     """
