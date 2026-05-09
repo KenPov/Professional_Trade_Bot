@@ -1,0 +1,46 @@
+name: Future Signal Bot Runner
+
+on:
+  schedule:
+    # Runs every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Allows the bot to commit last_signals.json back to the repo
+    
+    # GitHub Actions will forcefully kill jobs after 6 hours. 
+    # Our python script handles its own graceful exit at 5h 50m.
+    timeout-minutes: 360 
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Trading Bot
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python -u main.py
+
+      - name: Save Signal State
+        if: always() # Ensure state is saved even if the bot is killed or errors
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add last_signals.json || true
+          git commit -m "Update signal tracking [skip ci]" || true
+          git push || true
