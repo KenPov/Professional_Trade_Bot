@@ -2,106 +2,125 @@ import pandas as pd
 import numpy as np
 import ta
 
-def analyze_data(df: pd.DataFrame) -> dict:
+def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
     """
-    Analyzes OHLCV data to generate a trading signal based on 
-    Professional & Smart Money Concepts (SMC).
-    
-    Expected DataFrame columns: timestamp, open, high, low, close, volume
+    Analyzes OHLCV data to generate high-probability signals.
+    Optimized for Accuracy & Professional Limit Entries.
     """
     if len(df) < 200:
         return {"signal": None, "analysis": "Not enough data"}
 
-    # --- Technical Indicators ---
-    # 1. Trend: EMA 200
+    # --- Technical Indicators (Optimized) ---
     df['ema_200'] = ta.trend.ema_indicator(df['close'], window=200)
-    
-    # 2. Trend Strength: ADX
     adx_indicator = ta.trend.ADXIndicator(df['high'], df['low'], df['close'], window=14)
     df['adx'] = adx_indicator.adx()
-    
-    # 3. Momentum: RSI
     df['rsi'] = ta.momentum.rsi(df['close'], window=14)
 
-    # --- Smart Money Concepts (SMC) ---
-    # 4. Fair Value Gaps (FVG)
-    # Bullish FVG: Low of current candle is higher than High of candle 2 periods ago
+    # --- SMC & Institutional Flow ---
     df['fvg_bullish'] = (df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])
-    # Bearish FVG: High of current candle is lower than Low of candle 2 periods ago
     df['fvg_bearish'] = (df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])
-
-    # 5. Volume Surge (Institutional footprint)
-    # Volume is greater than 1.5x the 20-period moving average of volume
+    
     df['vol_ma'] = df['volume'].rolling(window=20).mean()
-    df['volume_surge'] = df['volume'] > (df['vol_ma'] * 1.5)
+    df['volume_surge'] = df['volume'] > (df['vol_ma'] * 2.0) # Optimized multiplier
 
-    # Get the latest completed candle (index -2) and the current forming candle (index -1)
-    # We base our signal on the last fully closed candle to avoid repainting
+    # --- Higher Timeframe Trend (1H) ---
+    htf_trend = "NEUTRAL"
+    if df_htf is not None and len(df_htf) > 50:
+        df_htf['ema_50'] = ta.trend.ema_indicator(df_htf['close'], window=50)
+        last_htf = df_htf.iloc[-1]
+        if last_htf['close'] > last_htf['ema_50']:
+            htf_trend = "BULLISH"
+        elif last_htf['close'] < last_htf['ema_50']:
+            htf_trend = "BEARISH"
+
     last_closed = df.iloc[-2]
     prev_closed = df.iloc[-3]
+    current_candle = df.iloc[-1] # Open of current candle is a proxy for current market price
 
     signal = None
     analysis = ""
 
-    # --- LONG LOGIC ---
-    # 1. Price is above EMA 200 (Uptrend)
-    # 2. ADX > 20 (Strong trend emerging)
-    # 3. Bullish FVG formed recently (SMC)
-    # 4. Volume Surge present recently
-    # 5. RSI showing upward momentum
+    # --- REFINED LONG LOGIC ---
+    # 1. 15m Trend: Above EMA 200
+    # 2. HTF Trend: Bullish
+    # 3. Strength: ADX > 25 (Optimized)
+    # 4. Institutional: Recent FVG AND Volume Surge
+    # 5. Momentum: RSI increasing
     
     is_uptrend = last_closed['close'] > last_closed['ema_200']
-    strong_trend = last_closed['adx'] > 20
-    bullish_fvg_recent = df['fvg_bullish'].iloc[-6:-1].any() # FVG in the last 5 closed candles
-    recent_vol_surge = df['volume_surge'].iloc[-4:-1].any()  # Volume surge in last 3 candles
+    strong_trend = last_closed['adx'] > 25
+    bullish_fvg_recent = df['fvg_bullish'].iloc[-6:-1].any()
+    recent_vol_surge = df['volume_surge'].iloc[-4:-1].any()
     rsi_momentum_up = last_closed['rsi'] > prev_closed['rsi']
     
-    if is_uptrend and strong_trend and bullish_fvg_recent and recent_vol_surge and rsi_momentum_up:
+    if (is_uptrend and htf_trend == "BULLISH" and strong_trend and 
+        bullish_fvg_recent and recent_vol_surge and rsi_momentum_up):
         signal = "LONG"
         analysis = (
-            f"• Trend: Above EMA200\n"
-            f"• Strength: ADX at {last_closed['adx']:.1f}\n"
-            f"• SMC: Bullish FVG detected\n"
-            f"• Momentum: RSI Up ({last_closed['rsi']:.1f})\n"
-            f"• Volume: Institutional surge detected"
+            f"• MTF Trend: 1H Bullish Alignment\n"
+            f"• Strength: ADX strong at {last_closed['adx']:.1f}\n"
+            f"• SMC: Bullish FVG + High Vol Surge\n"
+            f"• Entry: Professional 50% Retracement"
         )
 
-    # --- SHORT LOGIC ---
+    # --- REFINED SHORT LOGIC ---
     is_downtrend = last_closed['close'] < last_closed['ema_200']
     bearish_fvg_recent = df['fvg_bearish'].iloc[-6:-1].any()
     rsi_momentum_down = last_closed['rsi'] < prev_closed['rsi']
 
-    if is_downtrend and strong_trend and bearish_fvg_recent and recent_vol_surge and rsi_momentum_down:
+    if (is_downtrend and htf_trend == "BEARISH" and strong_trend and 
+        bearish_fvg_recent and recent_vol_surge and rsi_momentum_down):
         signal = "SHORT"
         analysis = (
-            f"• Trend: Below EMA200\n"
-            f"• Strength: ADX at {last_closed['adx']:.1f}\n"
-            f"• SMC: Bearish FVG detected\n"
-            f"• Momentum: RSI Down ({last_closed['rsi']:.1f})\n"
-            f"• Volume: Institutional surge detected"
+            f"• MTF Trend: 1H Bearish Alignment\n"
+            f"• Strength: ADX strong at {last_closed['adx']:.1f}\n"
+            f"• SMC: Bearish FVG + High Vol Surge\n"
+            f"• Entry: Professional 50% Retracement"
         )
 
     limit_price = None
     sl = None
     tp = None
     
-    if signal == "LONG":
-        # Professional Limit Entry: 50% retracement of the bullish impulse candle
+    if signal:
+        # Professional Limit Entry: 50% retracement of the impulse candle
         limit_price = (last_closed['high'] + last_closed['low']) / 2.0
-        sl = last_closed['low'] * 0.999 # Just below the impulse candle
-        risk = limit_price - sl
-        tp = limit_price + (risk * 2.0) # 1:2 Risk/Reward
-    elif signal == "SHORT":
-        # Professional Limit Entry: 50% retracement of the bearish impulse candle
-        limit_price = (last_closed['high'] + last_closed['low']) / 2.0
-        sl = last_closed['high'] * 1.001 # Just above the impulse candle
-        risk = sl - limit_price
-        tp = limit_price - (risk * 2.0) # 1:2 Risk/Reward
+        
+        # --- CRITICAL FIX: Ensure limit is below market for LONG, above for SHORT ---
+        # Current price (approx) is current_candle['open']
+        current_market = current_candle['open']
+        
+        if signal == "LONG":
+            # If current price is already below our limit, we use a deeper retracement (0.618)
+            # to avoid immediate execution at a bad price.
+            if limit_price >= current_market:
+                limit_price = last_closed['low'] + (last_closed['high'] - last_closed['low']) * 0.382
+            
+            # Final check: if still above, discard or set slightly below
+            if limit_price >= current_market:
+                limit_price = current_market * 0.998 # 0.2% below market
+                
+            sl = last_closed['low'] * 0.998
+            risk = limit_price - sl
+            if risk <= 0: return {"signal": None} # Avoid invalid trades
+            tp = limit_price + (risk * 2.0)
+            
+        elif signal == "SHORT":
+            if limit_price <= current_market:
+                limit_price = last_closed['low'] + (last_closed['high'] - last_closed['low']) * 0.618
+            
+            if limit_price <= current_market:
+                limit_price = current_market * 1.002
+                
+            sl = last_closed['high'] * 1.002
+            risk = sl - limit_price
+            if risk <= 0: return {"signal": None}
+            tp = limit_price - (risk * 2.0)
 
     return {
         "signal": signal,
         "analysis": analysis,
-        "price": limit_price if limit_price else last_closed['close'],
+        "price": limit_price,
         "sl": sl,
         "tp": tp
     }

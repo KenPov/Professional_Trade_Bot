@@ -24,12 +24,15 @@ def fetch_data(symbol: str, timeframe: str = '15m', limit: int = 210) -> pd.Data
 def process_symbol(symbol: str):
     """
     Fetches data and applies the strategy for a single symbol.
+    Uses multi-timeframe analysis (15m and 1h).
     """
-    df = fetch_data(symbol)
-    if df.empty:
+    df_15m = fetch_data(symbol, timeframe='15m', limit=250)
+    df_1h = fetch_data(symbol, timeframe='1h', limit=100)
+    
+    if df_15m.empty or df_1h.empty:
         return None
 
-    result = analyze_data(df)
+    result = analyze_data(df_15m, df_htf=df_1h)
     
     if result.get("signal"):
         return {
