@@ -2,17 +2,53 @@ import pandas as pd
 import ta
 
 
-def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
+def analyze_data(
+    df: pd.DataFrame,
+    df_htf: pd.DataFrame = None,
+    symbol: str = ""
+) -> dict:
+
+    # =========================================================
+    # MINIMUM DATA CHECK
+    # =========================================================
 
     if len(df) < 200:
         return {"signal": None}
 
     # =========================================================
+    # SYMBOL SETTINGS
+    # =========================================================
+
+    is_gold = (
+        'XAU' in symbol.upper() or
+        'GOLD' in symbol.upper()
+    )
+
+    # Gold uses wider stop and bigger RR
+    if is_gold:
+        atr_multiplier = 2.0
+        rr_ratio = 2.0
+        adx_min = 20
+        adx_max = 40
+    else:
+        atr_multiplier = 1.5
+        rr_ratio = 1.5
+        adx_min = 18
+        adx_max = 35
+
+    # =========================================================
     # INDICATORS
     # =========================================================
 
-    df['ema_50'] = ta.trend.ema_indicator(df['close'], window=50)
-    df['ema_200'] = ta.trend.ema_indicator(df['close'], window=200)
+    df['ema_50'] = ta.trend.ema_indicator(
+        df['close'],
+        window=50
+    )
+
+    df['ema_200'] = ta.trend.ema_indicator(
+        df['close'],
+        window=200
+    )
 
     adx_indicator = ta.trend.ADXIndicator(
         df['high'],
@@ -23,7 +59,10 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
 
     df['adx'] = adx_indicator.adx()
 
-    df['rsi'] = ta.momentum.rsi(df['close'], window=14)
+    df['rsi'] = ta.momentum.rsi(
+        df['close'],
+        window=14
+    )
 
     df['atr'] = ta.volatility.average_true_range(
         df['high'],
@@ -33,7 +72,7 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
     )
 
     # =========================================================
-    # FAIR VALUE GAPS (SMC)
+    # FAIR VALUE GAPS
     # =========================================================
 
     df['fvg_bullish'] = (
@@ -47,13 +86,18 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
     )
 
     # =========================================================
-    # VOLUME
+    # VOLUME ANALYSIS
     # =========================================================
 
-    df['vol_ma'] = df['volume'].rolling(window=20).mean()
+    df['vol_ma'] = (
+        df['volume']
+        .rolling(window=20)
+        .mean()
+    )
 
     df['volume_surge'] = (
-        df['volume'] > (df['vol_ma'] * 1.5)
+        df['volume'] >
+        (df['vol_ma'] * 1.5)
     )
 
     # =========================================================
@@ -86,11 +130,13 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
     current_candle = df.iloc[-1]
 
     bullish_candle = (
-        last_closed['close'] > last_closed['open']
+        last_closed['close'] >
+        last_closed['open']
     )
 
     bearish_candle = (
-        last_closed['close'] < last_closed['open']
+        last_closed['close'] <
+        last_closed['open']
     )
 
     # =========================================================
@@ -109,9 +155,10 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
         last_closed['ema_200']
     )
 
-    # Better ADX range
     strong_trend = (
-        18 < last_closed['adx'] < 35
+        adx_min <
+        last_closed['adx'] <
+        adx_max
     )
 
     # =========================================================
@@ -119,11 +166,15 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
     # =========================================================
 
     rsi_good_long = (
-        50 < last_closed['rsi'] < 68
+        50 <
+        last_closed['rsi'] <
+        68
     )
 
     rsi_good_short = (
-        32 < last_closed['rsi'] < 50
+        32 <
+        last_closed['rsi'] <
+        50
     )
 
     # =========================================================
@@ -131,11 +182,13 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
     # =========================================================
 
     higher_high = (
-        last_closed['high'] > prev_closed['high']
+        last_closed['high'] >
+        prev_closed['high']
     )
 
     lower_low = (
-        last_closed['low'] < prev_closed['low']
+        last_closed['low'] <
+        prev_closed['low']
     )
 
     # =========================================================
@@ -143,19 +196,39 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
     # =========================================================
 
     bullish_fvg_recent = (
-        df['fvg_bullish'].iloc[-6:-1].any()
+        df['fvg_bullish']
+        .iloc[-6:-1]
+        .any()
     )
 
     bearish_fvg_recent = (
-        df['fvg_bearish'].iloc[-6:-1].any()
+        df['fvg_bearish']
+        .iloc[-6:-1]
+        .any()
     )
 
     recent_vol_surge = (
-        df['volume_surge'].iloc[-4:-1].any()
+        df['volume_surge']
+        .iloc[-4:-1]
+        .any()
     )
 
     # =========================================================
-    # LONG CONDITIONS
+    # AVOID HUGE OVEREXTENDED CANDLES
+    # =========================================================
+
+    candle_size = (
+        last_closed['high'] -
+        last_closed['low']
+    )
+
+    avoid_extreme_candle = (
+        candle_size <
+        (last_closed['atr'] * 2.5)
+    )
+
+    # =========================================================
+    # LONG CONDITION
     # =========================================================
 
     long_condition = (
@@ -166,11 +239,12 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
         bullish_fvg_recent and
         recent_vol_surge and
         rsi_good_long and
-        higher_high
+        higher_high and
+        avoid_extreme_candle
     )
 
     # =========================================================
-    # SHORT CONDITIONS
+    # SHORT CONDITION
     # =========================================================
 
     short_condition = (
@@ -181,32 +255,43 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
         bearish_fvg_recent and
         recent_vol_surge and
         rsi_good_short and
-        lower_low
+        lower_low and
+        avoid_extreme_candle
     )
 
     signal = None
     analysis = ""
 
+    # =========================================================
+    # LONG SIGNAL
+    # =========================================================
+
     if long_condition:
+
         signal = "LONG"
 
         analysis = (
-            f"• Trend: Strong Bullish Alignment\n"
+            f"• Strong Bullish Trend\n"
             f"• ADX: {last_closed['adx']:.1f}\n"
             f"• RSI: {last_closed['rsi']:.1f}\n"
-            f"• Volume Surge Confirmed\n"
-            f"• Market Structure Break Up"
+            f"• Volume Confirmed\n"
+            f"• Bullish Structure Break"
         )
 
+    # =========================================================
+    # SHORT SIGNAL
+    # =========================================================
+
     elif short_condition:
+
         signal = "SHORT"
 
         analysis = (
-            f"• Trend: Strong Bearish Alignment\n"
+            f"• Strong Bearish Trend\n"
             f"• ADX: {last_closed['adx']:.1f}\n"
             f"• RSI: {last_closed['rsi']:.1f}\n"
-            f"• Volume Surge Confirmed\n"
-            f"• Market Structure Break Down"
+            f"• Volume Confirmed\n"
+            f"• Bearish Structure Break"
         )
 
     # =========================================================
@@ -224,7 +309,10 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
         # Professional retracement entry
         limit_price = (
             last_closed['low'] +
-            (last_closed['high'] - last_closed['low']) * 0.5
+            (
+                (last_closed['high'] - last_closed['low'])
+                * 0.5
+            )
         )
 
         atr = last_closed['atr']
@@ -235,13 +323,16 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
 
         if signal == "LONG":
 
+            # Ensure limit is below market
             if limit_price >= current_market:
+
                 limit_price = (
                     current_market * 0.998
                 )
 
             sl = (
-                limit_price - (atr * 1.5)
+                limit_price -
+                (atr * atr_multiplier)
             )
 
             risk = (
@@ -251,9 +342,9 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
             if risk <= 0:
                 return {"signal": None}
 
-            # Better TP ratio for higher win rate
             tp = (
-                limit_price + (risk * 1.5)
+                limit_price +
+                (risk * rr_ratio)
             )
 
         # =====================================================
@@ -262,13 +353,16 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
 
         elif signal == "SHORT":
 
+            # Ensure limit above market
             if limit_price <= current_market:
+
                 limit_price = (
                     current_market * 1.002
                 )
 
             sl = (
-                limit_price + (atr * 1.5)
+                limit_price +
+                (atr * atr_multiplier)
             )
 
             risk = (
@@ -279,7 +373,8 @@ def analyze_data(df: pd.DataFrame, df_htf: pd.DataFrame = None) -> dict:
                 return {"signal": None}
 
             tp = (
-                limit_price - (risk * 1.5)
+                limit_price -
+                (risk * rr_ratio)
             )
 
     return {
