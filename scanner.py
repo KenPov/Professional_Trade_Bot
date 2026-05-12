@@ -1,26 +1,30 @@
 import ccxt
 import pandas as pd
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed
+)
 
 from strategy import analyze_data
 from notifier import send_signal
 
 # =========================================================
-# EXCHANGE CONFIGURATION
+# MEXC FUTURES CONFIGURATION
 # =========================================================
 
 exchange = ccxt.mexc({
-    'enableRateLimit': True
+    'enableRateLimit': True,
+    'timeout': 30000,
+    'options': {
+        'defaultType': 'swap'
+    }
 })
 
 # =========================================================
 # HIGH QUALITY PAIRS ONLY
 # =========================================================
-# Add Gold if available on MEXC
-# Example possible symbols:
-# 'XAU/USDT:USDT'
-# 'GOLD/USDT:USDT'
 
 MAJOR_PAIRS = [
     'BTC/USDT:USDT',
@@ -36,12 +40,10 @@ MAJOR_PAIRS = [
     'LTC/USDT:USDT',
     'BCH/USDT:USDT',
     'XAU/USDT:USDT'
-    # GOLD (Enable only if available on MEXC)
-    # 'XAU/USDT:USDT',
 ]
 
 # =========================================================
-# FETCH OHLCV DATA
+# FETCH MARKET DATA
 # =========================================================
 
 def fetch_data(
@@ -49,57 +51,65 @@ def fetch_data(
     timeframe: str = '15m',
     limit: int = 250
 ) -> pd.DataFrame:
-    """
-    Fetch OHLCV data from MEXC.
-    """
 
-    try:
+    max_retries = 3
 
-        ohlcv = exchange.fetch_ohlcv(
-            symbol,
-            timeframe=timeframe,
-            limit=limit
-        )
+    for attempt in range(max_retries):
 
-        df = pd.DataFrame(
-            ohlcv,
-            columns=[
-                'timestamp',
-                'open',
-                'high',
-                'low',
-                'close',
-                'volume'
-            ]
-        )
+        try:
 
-        df['timestamp'] = pd.to_datetime(
-            df['timestamp'],
-            unit='ms'
-        )
+            ohlcv = exchange.fetch_ohlcv(
+                symbol,
+                timeframe=timeframe,
+                limit=limit
+            )
 
-        return df
+            if not ohlcv:
+                return pd.DataFrame()
 
-    except Exception as e:
+            df = pd.DataFrame(
+                ohlcv,
+                columns=[
+                    'timestamp',
+                    'open',
+                    'high',
+                    'low',
+                    'close',
+                    'volume'
+                ]
+            )
 
-        print(
-            f"Failed fetching data "
-            f"{symbol} {timeframe}: {e}"
-        )
+            df['timestamp'] = pd.to_datetime(
+                df['timestamp'],
+                unit='ms'
+            )
 
-        return pd.DataFrame()
+            return df
+
+        except Exception as e:
+
+            print(
+                f"Retry "
+                f"{attempt + 1}/{max_retries} "
+                f"fetching {symbol} "
+                f"{timeframe}: {e}"
+            )
+
+            time.sleep(2)
+
+    return pd.DataFrame()
 
 # =========================================================
-# PROCESS SYMBOL
+# PROCESS SINGLE SYMBOL
 # =========================================================
 
 def process_symbol(symbol: str):
 
     try:
 
-        # ================================================
-        # ENTRY TIMEFRAME (15m)
-        # ================================================
+        # =================================================
+        # ENTRY TIMEFRAME
+        # =================================================
 
         df_15m = fetch_data(
             symbol=symbol,
@@ -107,9 +117,9 @@ def process_symbol(symbol: str):
             limit=250
         )
 
-        # ================================================
-        # HIGHER TIMEFRAME (1h)
-        # ================================================
+        # =================================================
+        # HIGHER TIMEFRAME
+        # =================================================
 
         df_1h = fetch_data(
             symbol=symbol,
@@ -117,16 +127,19 @@ def process_symbol(symbol: str):
             limit=120
         )
 
-        # ================================================
+        # =================================================
         # VALIDATION
-        # ================================================
+        # =================================================
 
-        if df_15m.empty or df_1h.empty:
+        if df_15m.empty:
             return None
 
-        # ================================================
+        if df_1h.empty:
+            return None
+
+        # =================================================
         # ANALYZE STRATEGY
-        # ================================================
+        # =================================================
 
         result = analyze_data(
             df=df_15m,
@@ -134,49 +147,38 @@ def process_symbol(symbol: str):
             symbol=symbol
         )
 
-        if result.get("signal"):
+        if not result.get("signal"):
+            return None
 
-            return {
-                "symbol": symbol,
-                "signal": result["signal"],
-                "price": result["price"],
-                "sl": result["sl"],
-                "tp": result["tp"],
-                "analysis": result["analysis"]
-            }
-
-        return None
+        return {
+            "symbol": symbol,
+            "signal": result["signal"],
+            "price": result["price"],
+            "sl": result["sl"],
+            "tp": result["tp"],
+            "analysis": result["analysis"]
+        }
 
     except Exception as e:
 
-        print(f"Error processing {symbol}: {e}")
+        print(
+            f"Error processing "
+            f"{symbol}: {e}"
+        )
 
         return None
 
 # =========================================================
-# MAIN MARKET SCANNER
+# MAIN SCANNER
 # =========================================================
 
 def scan_markets(cooldown_tracker: dict):
 
-    print("\nLoading MEXC markets...")
+    print("\nLoading MEXC futures markets...")
 
     try:
 
         markets = exchange.load_markets()
-
-        # =================================================
-        # ACTIVE USDT PERPETUAL SWAP PAIRS ONLY
-        # =================================================
-
-        usdt_pairs = [
-            symbol for symbol, market in markets.items()
-            if (
-                market.get('active') and
-                market.get('swap') and
-                market.get('quote') == 'USDT'
-            )
-        ]
 
     except Exception as e:
 
@@ -185,43 +187,66 @@ def scan_markets(cooldown_tracker: dict):
         return
 
     # =====================================================
-    # FILTER TO HIGH QUALITY PAIRS ONLY
+    # FILTER AVAILABLE PAIRS
     # =====================================================
 
-    symbols_to_scan = [
-        pair for pair in MAJOR_PAIRS
-        if pair in usdt_pairs
-    ]
+    available_pairs = []
+
+    for pair in MAJOR_PAIRS:
+
+        if pair in markets:
+
+            market = markets[pair]
+
+            if (
+                market.get('active') and
+                (
+                    market.get('swap') or
+                    market.get('future')
+                )
+            ):
+
+                available_pairs.append(pair)
+
+    # =====================================================
+    # NO PAIRS FOUND
+    # =====================================================
+
+    if not available_pairs:
+
+        print("No valid futures pairs found.")
+
+        return
 
     print(
         f"Scanning "
-        f"{len(symbols_to_scan)} "
-        f"high-quality pairs..."
+        f"{len(available_pairs)} "
+        f"pairs..."
     )
 
     # =====================================================
-    # COOLDOWN SETTINGS
+    # COOLDOWN
     # =====================================================
 
     current_time = time.time()
 
-    # 2 hours cooldown
     COOLDOWN_PERIOD = 7200
 
     signals_found = 0
 
     # =====================================================
-    # PARALLEL SCANNING
+    # IMPORTANT:
+    # Lower workers for MEXC stability
     # =====================================================
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
 
         future_to_symbol = {
             executor.submit(
                 process_symbol,
                 symbol
             ): symbol
-            for symbol in symbols_to_scan
+            for symbol in available_pairs
         }
 
         for future in as_completed(future_to_symbol):
@@ -250,14 +275,14 @@ def scan_markets(cooldown_tracker: dict):
                 ):
 
                     print(
-                        f"Cooldown active for "
-                        f"{symbol}"
+                        f"Cooldown active "
+                        f"for {symbol}"
                     )
 
                     continue
 
                 # =========================================
-                # VALIDATE TRADE LEVELS
+                # VALIDATE PRICES
                 # =========================================
 
                 if (
@@ -268,33 +293,36 @@ def scan_markets(cooldown_tracker: dict):
                     continue
 
                 # =========================================
-                # PRINT SIGNAL
+                # DISPLAY SIGNAL
                 # =========================================
 
-                print("\n================================================")
+                print("\n===================================")
 
                 print(
-                    f"SIGNAL FOUND => "
+                    f"SIGNAL => "
                     f"{data['signal']} "
                     f"{symbol}"
                 )
 
                 print(
-                    f"ENTRY : {data['price']:.4f}"
+                    f"ENTRY : "
+                    f"{data['price']:.4f}"
                 )
 
                 print(
-                    f"SL    : {data['sl']:.4f}"
+                    f"SL    : "
+                    f"{data['sl']:.4f}"
                 )
 
                 print(
-                    f"TP    : {data['tp']:.4f}"
+                    f"TP    : "
+                    f"{data['tp']:.4f}"
                 )
 
-                print("================================================")
+                print("===================================")
 
                 # =========================================
-                # SEND TELEGRAM SIGNAL
+                # SEND TELEGRAM
                 # =========================================
 
                 send_signal(
@@ -322,14 +350,14 @@ def scan_markets(cooldown_tracker: dict):
                 )
 
     # =====================================================
-    # SCAN SUMMARY
+    # SUMMARY
     # =====================================================
 
-    print("\n========================================")
+    print("\n===================================")
 
     print(
         f"Scan completed | "
         f"Signals found: {signals_found}"
     )
 
-    print("========================================")
+    print("===================================")
