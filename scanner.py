@@ -35,7 +35,7 @@ MAJOR_PAIRS = [
     'SUI/USDT:USDT',
     'LTC/USDT:USDT',
     'BCH/USDT:USDT',
-
+    'XAU/USDT:USDT'
     # GOLD (Enable only if available on MEXC)
     # 'XAU/USDT:USDT',
 ]
