@@ -29,23 +29,21 @@ def send_telegram_message(message: str):
 
 def send_signal(symbol: str, side: str, price: float, sl: float, tp: float, analysis: str):
     """
-    Formats and sends a trading signal to Telegram.
+    Formats and sends a high-win-rate signal in a clean professional format.
     """
-    icon = "🟢" if side.upper() == "LONG" else "🔴"
-    
-    # Calculate Risk/Reward ratio dynamically for display
-    risk = abs(price - sl)
-    reward = abs(tp - price)
-    rr_ratio = reward / risk if risk > 0 else 0
+    icon = "🚀" if side.upper() == "LONG" else "📉"
+    side_icon = "🔵 BUY" if side.upper() == "LONG" else "🔴 SELL"
     
     msg = (
-        f"{icon} <b>{side.upper()} SIGNAL: {symbol}</b> {icon}\n\n"
-        f"<b>Limit Entry Price:</b> {price:.5f}\n"
-        f"<b>Take Profit (Target):</b> {tp:.5f}\n"
-        f"<b>Stop Loss (Structure):</b> {sl:.5f}\n"
-        f"<b>Risk/Reward:</b> 1:{rr_ratio:.1f}\n"
-        f"<b>Strategy:</b> SMC + Pro Indicators\n"
-        f"<b>Analysis:</b>\n{analysis}\n\n"
-        f"<i>Automated Alert via Professional Trade Bot</i>"
+        f"{icon} <b>{symbol} - {side_icon}</b> {icon}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"📍 <b>ENTRY:</b> <code>{price:.5f}</code>\n"
+        f"🎯 <b>TP:</b> <code>{tp:.5f}</code>\n"
+        f"🛡️ <b>SL:</b> <code>{sl:.5f}</code>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"📊 <b>Market Analysis:</b>\n"
+        f"{analysis}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"💰 <i>Professional Sniper Signal</i>"
     )
     send_telegram_message(msg)
